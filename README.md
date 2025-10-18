@@ -117,3 +117,45 @@ Monitor and analyze how long customers stay in designated areas within cafes or 
 
 ## Contributing
 Contributions are welcome! Please fork the repository and submit a pull request for any enhancements or bug fixes.
+
+## Troubleshooting
+
+If you hit an error during `pip install -r requirements.txt` while building packages (for example an error from meson mentioning "Malformed value in machine file variable 'python'"), the most common cause on Windows is an apostrophe or other special character in the full path to your Python executable or project folder. Meson writes a machine file that does not handle unescaped/single-quoted paths well, which produces a parse error.
+
+Recommended fixes (pick one):
+
+- Create a virtual environment in a path that does not contain apostrophes or other special characters (example below). Then install requirements from inside that venv.
+
+PowerShell example (run from any folder):
+
+```powershell
+# create a safe location for the venv (no apostrophes, no spaces is even better)
+New-Item -ItemType Directory -Path C:\venvs -Force
+
+# create virtualenv
+python -m venv C:\venvs\yolo-obj-timing
+
+# activate
+C:\venvs\yolo-obj-timing\Scripts\Activate.ps1
+
+# upgrade packaging tools
+python -m pip install --upgrade pip setuptools wheel
+
+# install requirements (prefer binary wheels)
+pip install --upgrade pip
+pip install --prefer-binary -r "c:\Musfique's Folder\Python\Yolo-Object-Timing\requirements.txt"
+```
+
+- Alternative: Use conda or Miniconda to create an environment and install packages (conda distributes pre-built binaries and usually avoids build-time errors). Example:
+
+```powershell
+conda create -n yolo-timing python=3.11
+conda activate yolo-timing
+pip install -r "c:\Musfique's Folder\Python\Yolo-Object-Timing\requirements.txt"
+```
+
+- Another option is to move your project folder to a path without apostrophes (for example `C:\Projects\Yolo-Object-Timing`) or install Python to a path without apostrophes and ensure that interpreter is used.
+
+Notes:
+- If a package still needs to be built from source (no wheel available for your exact Python version), you may need build tools (msvc, meson, ninja). Using Python 3.11 or conda often avoids that by using prebuilt wheels.
+- The core bug in the error above is caused by an embedded apostrophe breaking Meson's machine file parsing; removing the apostrophe from the path is the simplest fix.

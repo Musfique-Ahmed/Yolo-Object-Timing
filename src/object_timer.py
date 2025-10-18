@@ -1,6 +1,7 @@
 from collections import defaultdict
 
 import cv2
+import numpy as np
 
 from ultralytics.utils.checks import check_imshow, check_requirements
 from ultralytics.utils.plotting import Annotator, colors
@@ -18,6 +19,7 @@ class ObjectTimer:
         names,
         reg_pts=None,
         fps=None,
+        dataset_path: str = None,
         time_reg_color=(255, 0, 255),
         time_txt_color=(0, 0, 0),
         time_bg_color=(255, 255, 255),
@@ -94,6 +96,26 @@ class ObjectTimer:
         self.cls_txtdisplay_gap = cls_txtdisplay_gap
         self.fontsize = 0.6
 
+        # Dataset (CSV) path to save timing records
+        self.dataset_path = dataset_path
+        if self.dataset_path:
+            # lazy import csv, open file and write header if not exists
+            import os
+            import csv
+
+            self._csv_path = os.path.abspath(self.dataset_path)
+            write_header = not os.path.exists(self._csv_path)
+            try:
+                self._csv_file = open(self._csv_path, 'a', newline='', encoding='utf-8')
+                self._csv_writer = csv.writer(self._csv_file)
+                if write_header:
+                    self._csv_writer.writerow(['timestamp', 'frame', 'label', 'class', 'track_id', 'time_seconds'])
+                    self._csv_file.flush()
+            except Exception as e:
+                # If file can't be opened, disable dataset writing and warn
+                print(f"Warning: could not open dataset file {self.dataset_path} for writing: {e}")
+                self.dataset_path = None
+
         # Tracks info
         self.track_history = defaultdict(list)
         self.track_thickness = track_thickness
@@ -147,7 +169,72 @@ class ObjectTimer:
         """Extracts and processes tracks for object counting in a video stream."""
 
         # Annotator Init and region drawing
-        self.annotator = Annotator(self.im0, self.tf, self.names)
+        # Use a local wrapper annotator that provides draw_region and other helpers
+        # while delegating to the Ultralyitcs Annotator where possible.
+        class LocalAnnotator:
+            def __init__(self, im, line_thickness, names):
+                self.im = im
+                self.line_thickness = line_thickness
+                self.names = names
+
+            def _color(self, color):
+                # Ensure color is a BGR tuple of ints
+                try:
+                    if hasattr(color, 'tolist'):
+                        color = tuple(int(x) for x in color.tolist())
+                except Exception:
+                    pass
+                if isinstance(color, (list, tuple)):
+                    return tuple(int(c) for c in color)
+                return (255, 255, 255)
+
+            def draw_region(self, reg_pts, color=(255, 0, 255), thickness=2):
+                pts = np.array(reg_pts, np.int32)
+                pts = pts.reshape((-1, 1, 2))
+                cv2.polylines(self.im, [pts], isClosed=True, color=self._color(color), thickness=int(thickness))
+
+            def draw_centroid_and_tracks(self, track_line, color=(0, 255, 0), track_thickness=2):
+                if not track_line:
+                    return
+                pts = [(int(p[0]), int(p[1])) for p in track_line]
+                # draw trail
+                for i in range(1, len(pts)):
+                    cv2.line(self.im, pts[i - 1], pts[i], self._color(color), thickness=int(track_thickness))
+                # draw current centroid
+                cv2.circle(self.im, pts[-1], max(2, int(track_thickness)), self._color(color), -1)
+
+            def box_label(self, box, label=None, color=(255, 0, 255)):
+                # box may be a tensor-like or sequence [x1,y1,x2,y2]
+                try:
+                    x1, y1, x2, y2 = [int(float(x)) for x in box[:4]]
+                except Exception:
+                    return
+                c = self._color(color)
+                cv2.rectangle(self.im, (x1, y1), (x2, y2), c, thickness=self.line_thickness)
+                if label:
+                    # draw label background
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    txt_size = cv2.getTextSize(label, font, 0.5, 1)[0]
+                    txt_w, txt_h = txt_size
+                    cv2.rectangle(self.im, (x1, y1 - txt_h - 6), (x1 + txt_w + 6, y1), c, -1)
+                    cv2.putText(self.im, label, (x1 + 3, y1 - 4), font, 0.5, (0, 0, 0), thickness=1, lineType=cv2.LINE_AA)
+
+            def display_analytics(self, im, labels_dict, txt_color=(0, 0, 0), bg_color=(255, 255, 255), start_y=10):
+                # display analytics at top-left corner
+                x = 10
+                y = start_y
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                for k, v in labels_dict.items():
+                    text = f"{k}: {v}"
+                    txt_size = cv2.getTextSize(text, font, 0.6, 1)[0]
+                    txt_w, txt_h = txt_size
+                    # background
+                    cv2.rectangle(self.im, (x, y), (x + txt_w + 8, y + txt_h + 8), self._color(bg_color), -1)
+                    # text
+                    cv2.putText(self.im, text, (x + 4, y + txt_h + 4), font, 0.6, self._color(txt_color), thickness=1, lineType=cv2.LINE_AA)
+                    y += txt_h + 12
+
+        self.annotator = LocalAnnotator(self.im0, self.tf, self.names)
 
         # Draw region or line
         self.annotator.draw_region(
@@ -211,6 +298,17 @@ class ObjectTimer:
                             label=label_box,
                             color=colors(int(track_id), True),
                         )
+                        # write to dataset if configured
+                        if getattr(self, '_csv_writer', None):
+                            try:
+                                import time as _time
+
+                                cls_name = self.names.get(cls, str(cls))
+                                timestamp = _time.time()
+                                self._csv_writer.writerow([timestamp, num_frame, label, cls_name, int(track_id), time])
+                                self._csv_file.flush()
+                            except Exception as e:
+                                print(f"Warning: failed to write timing row: {e}")
 
         labels_dict = {}
 

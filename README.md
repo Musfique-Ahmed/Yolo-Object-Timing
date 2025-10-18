@@ -159,3 +159,11 @@ pip install -r "c:\Musfique's Folder\Python\Yolo-Object-Timing\requirements.txt"
 Notes:
 - If a package still needs to be built from source (no wheel available for your exact Python version), you may need build tools (msvc, meson, ninja). Using Python 3.11 or conda often avoids that by using prebuilt wheels.
 - The core bug in the error above is caused by an embedded apostrophe breaking Meson's machine file parsing; removing the apostrophe from the path is the simplest fix.
+
+Helper script
+
+If you'd like a one-shot script that creates a venv in a safe location and installs the requirements, a PowerShell helper is included at `scripts/setup-env.ps1`. Run it from PowerShell:
+
+```powershell
+.\scripts\setup-env.ps1
+```
